@@ -39,63 +39,63 @@
             aria-describedby="graphInstructions"
             aria-label="Editor de diagrama de estados"
           ></div>
+
+          <div id="tapeArea" class="tape-cards" aria-live="polite"></div>
+
+          <details class="advanced advanced-under-graph">
+            <summary>Edición avanzada de transiciones</summary>
+            <p class="hint">Formato: <code>e0 (>,>) -> (->, ->, e0)</code></p>
+
+            <label for="transitionInput">
+              Editor rápido (una transición)
+              <input
+                id="transitionInput"
+                type="text"
+                spellcheck="false"
+                placeholder="e0 (>,>) -> (->, 1->, e1)"
+              />
+            </label>
+            <div class="actions compact">
+              <button id="saveTransition" type="button">Guardar</button>
+              <button id="deleteTransition" type="button">Eliminar flecha</button>
+              <button id="clearTransition" type="button">Limpiar</button>
+            </div>
+
+            <div class="table-wrap" aria-label="Tabla editable de transiciones">
+              <table id="transitionsTable" class="transitions-table">
+                <thead id="transitionsTableHead"></thead>
+                <tbody id="transitionsTableBody"></tbody>
+              </table>
+            </div>
+            <div class="actions compact">
+              <button id="addTransitionRow" type="button">Agregar fila</button>
+              <button id="deleteTransitionRow" type="button">Eliminar fila</button>
+              <button id="applyTransitionTable" type="button">Aplicar tabla</button>
+            </div>
+
+            <label for="transitionsPreview">
+              Texto crudo (opcional)
+              <textarea id="transitionsPreview" rows="4" spellcheck="false"></textarea>
+            </label>
+          </details>
         </section>
 
         <aside class="side-column">
           <section class="panel config" aria-labelledby="configTitle">
             <h2 id="configTitle">Configuración</h2>
 
-            <label for="tapesInput">
-              Cintas iniciales (una por línea)
-              <textarea
-                id="tapesInput"
-                rows="5"
-                spellcheck="false"
-                placeholder="cinta1=[>,1,1,1,1]\ncinta2=[>,#,#,#,#]"
-              ></textarea>
+            <label for="tapeCount">
+              Cantidad de cintas
+              <input id="tapeCount" type="number" min="1" step="1" value="2" />
             </label>
+
+            <div id="initialTapesEditor" class="tapes-config" aria-label="Editor de cintas iniciales"></div>
+            <p class="hint">Solo la Cinta 1 es editable manualmente. Las demás son cintas infinitas (inician con <code>></code>).</p>
 
             <div class="actions compact">
               <button id="initialize" type="button">Inicializar</button>
               <button id="reset" type="button">Reiniciar</button>
             </div>
-
-            <details class="advanced">
-              <summary>Edición avanzada de transiciones</summary>
-              <p class="hint">Formato: <code>e0 (>,>) -> (->, ->, e0)</code></p>
-
-              <label for="transitionInput">
-                Editor rápido (una transición)
-                <input
-                  id="transitionInput"
-                  type="text"
-                  spellcheck="false"
-                  placeholder="e0 (>,>) -> (->, 1->, e1)"
-                />
-              </label>
-              <div class="actions compact">
-                <button id="saveTransition" type="button">Guardar</button>
-                <button id="deleteTransition" type="button">Eliminar flecha</button>
-                <button id="clearTransition" type="button">Limpiar</button>
-              </div>
-
-              <div class="table-wrap" aria-label="Tabla editable de transiciones">
-                <table id="transitionsTable" class="transitions-table">
-                  <thead id="transitionsTableHead"></thead>
-                  <tbody id="transitionsTableBody"></tbody>
-                </table>
-              </div>
-              <div class="actions compact">
-                <button id="addTransitionRow" type="button">Agregar fila</button>
-                <button id="deleteTransitionRow" type="button">Eliminar fila</button>
-                <button id="applyTransitionTable" type="button">Aplicar tabla</button>
-              </div>
-
-              <label for="transitionsPreview">
-                Texto crudo (opcional)
-                <textarea id="transitionsPreview" rows="4" spellcheck="false"></textarea>
-              </label>
-            </details>
           </section>
 
           <section class="panel simulation" aria-labelledby="simTitle">
@@ -114,8 +114,6 @@
               <p><strong>Paso:</strong> <span id="stepCount">0</span></p>
               <p><strong>Mensaje:</strong> <span id="message" role="status">Crea el diagrama e inicializa la máquina.</span></p>
             </div>
-
-            <div id="tapeArea" class="tape-area" aria-live="polite"></div>
           </section>
         </aside>
       </div>

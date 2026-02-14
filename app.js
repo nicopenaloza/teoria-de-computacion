@@ -112,7 +112,8 @@ const ui = {
   saveTransition: document.getElementById("saveTransition"),
   deleteTransition: document.getElementById("deleteTransition"),
   clearTransition: document.getElementById("clearTransition"),
-  tapesInput: document.getElementById("tapesInput"),
+  tapeCount: document.getElementById("tapeCount"),
+  initialTapesEditor: document.getElementById("initialTapesEditor"),
   transitionsPreview: document.getElementById("transitionsPreview"),
   transitionsTable: document.getElementById("transitionsTable"),
   transitionsTableHead: document.getElementById("transitionsTableHead"),
@@ -182,31 +183,65 @@ function splitByCommaPreserve(value) {
   return value.split(",").map((s) => s.trim());
 }
 
-function parseTapeDefinitions(raw) {
-  const lines = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"));
-
-  if (!lines.length) {
-    throw new Error("Debes definir al menos una cinta.");
+function parseTapeSymbols(raw, tapeName) {
+  const trimmed = raw.trim();
+  const body = trimmed.startsWith("[") && trimmed.endsWith("]")
+    ? trimmed.slice(1, -1)
+    : trimmed;
+  const symbols = splitByCommaPreserve(body).map((s) => s.trim());
+  if (!symbols.length || (symbols.length === 1 && symbols[0] === "")) {
+    throw new Error(`La ${tapeName} no puede estar vacía.`);
   }
+  return symbols.map((s) => (s === "" ? "#" : s));
+}
 
-  return lines.map((line, idx) => {
-    const match = line.match(/^([a-zA-Z][\w-]*)\s*=\s*\[(.*)\]$/);
-    if (!match) {
-      throw new Error(`Formato inválido en cintas, línea ${idx + 1}. Usa: cinta1=[>,1,#]`);
-    }
-    const name = match[1];
-    const symbols = splitByCommaPreserve(match[2]).map((s) => s.trim());
+function getConfiguredTapeCount() {
+  const parsed = Number.parseInt(ui.tapeCount.value, 10);
+  return Math.max(Number.isFinite(parsed) ? parsed : 2, 1);
+}
 
-    if (!symbols.length || (symbols.length === 1 && symbols[0] === "")) {
-      throw new Error(`La cinta ${name} no puede estar vacía.`);
-    }
+function renderInitialTapesEditor(tapeCount, initialTapes = null) {
+  ui.initialTapesEditor.innerHTML = "";
+  const defaultFirst = [">", "1", "1", "1", "#"];
+  const firstSymbols = initialTapes && initialTapes[0] ? initialTapes[0].symbols : defaultFirst;
+  const row = document.createElement("div");
+  row.className = "tape-config-row";
 
-    const cleaned = symbols.map((s) => (s === "" ? "#" : s));
-    return { name, symbols: cleaned };
-  });
+  const label = document.createElement("label");
+  label.textContent = "Cinta 1";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.spellcheck = false;
+  input.dataset.tapeInput = "0";
+  input.placeholder = ">,1,1,1,#";
+  input.value = firstSymbols.join(",");
+
+  row.appendChild(label);
+  row.appendChild(input);
+  ui.initialTapesEditor.appendChild(row);
+}
+
+function readInitialTapesFromEditor() {
+  const tapeCount = getConfiguredTapeCount();
+  const inputs = [...ui.initialTapesEditor.querySelectorAll("input[data-tape-input]")];
+  if (!inputs.length) {
+    renderInitialTapesEditor(tapeCount);
+    throw new Error("Se actualizó el editor de cintas. Revisa las entradas e intenta de nuevo.");
+  }
+  const firstInput = inputs.find((input) => input.dataset.tapeInput === "0");
+  if (!firstInput) {
+    throw new Error("No se encontró la Cinta 1.");
+  }
+  const firstSymbols = parseTapeSymbols(firstInput.value, "cinta1");
+  const tapes = [{ name: "cinta1", symbols: firstSymbols }];
+  for (let i = 1; i < tapeCount; i += 1) {
+    tapes.push({
+      name: `cinta${i + 1}`,
+      symbols: [">"],
+    });
+  }
+  return tapes;
 }
 
 function parseActionToken(rawToken) {
@@ -438,11 +473,7 @@ function selectTransitionByKey(key) {
 }
 
 function getExpectedTapeCount() {
-  try {
-    return parseTapeDefinitions(ui.tapesInput.value).length;
-  } catch {
-    return null;
-  }
+  return getConfiguredTapeCount();
 }
 
 function getTapeCountForTable() {
@@ -621,6 +652,45 @@ function validateTransitionTapeWidth(parsed, expectedTapeCount) {
   if (parsed.actions.length !== expectedTapeCount) {
     throw new Error(`Las acciones deben tener ${expectedTapeCount} valores (uno por cinta).`);
   }
+}
+
+function normalizeTransitionToTapeCount(transition, tapeCount) {
+  const normalizedReads = [...transition.readSymbols];
+  const normalizedActions = [...transition.actions];
+  const fillReadSymbol = normalizedReads.length > 0 && normalizedReads.every((s) => s === ">")
+    ? ">"
+    : "#";
+
+  while (normalizedReads.length < tapeCount) {
+    normalizedReads.push(fillReadSymbol);
+  }
+  while (normalizedActions.length < tapeCount) {
+    normalizedActions.push({ writeSymbol: null, move: "R" });
+  }
+
+  return {
+    ...transition,
+    readSymbols: normalizedReads.slice(0, tapeCount),
+    actions: normalizedActions.slice(0, tapeCount),
+  };
+}
+
+function autoAdjustTransitionsToTapeCount(tapeCount) {
+  const normalizedMap = new Map();
+
+  editor.transitions.forEach((transition) => {
+    const normalized = normalizeTransitionToTapeCount(transition, tapeCount);
+    const key = transitionKey(normalized.fromState, normalized.readSymbols);
+    normalizedMap.set(key, {
+      fromState: normalized.fromState,
+      nextState: normalized.nextState,
+      readSymbols: normalized.readSymbols,
+      actions: normalized.actions,
+      key,
+    });
+  });
+
+  editor.transitions = [...normalizedMap.values()];
 }
 
 function ensureStateName(name) {
@@ -1406,30 +1476,21 @@ function buildMachineFromEditor() {
     throw new Error("Debe existir exactamente un estado inicial.");
   }
 
-  const tapes = parseTapeDefinitions(ui.tapesInput.value);
+  const tapes = readInitialTapesFromEditor();
   const tapeCount = tapes.length;
+  autoAdjustTransitionsToTapeCount(tapeCount);
 
   const transitions = new Map();
   editor.transitions.forEach((transition) => {
-    if (transition.readSymbols.length !== tapeCount) {
-      throw new Error(
-        `Transición inválida (${transitionToLine(transition)}): lectura debe tener ${tapeCount} valores.`,
-      );
-    }
-    if (transition.actions.length !== tapeCount) {
-      throw new Error(
-        `Transición inválida (${transitionToLine(transition)}): acciones deben tener ${tapeCount} valores.`,
-      );
-    }
-
-    const key = transitionKey(transition.fromState, transition.readSymbols);
+    const normalized = normalizeTransitionToTapeCount(transition, tapeCount);
+    const key = transitionKey(normalized.fromState, normalized.readSymbols);
     if (transitions.has(key)) {
-      throw new Error(`No determinista: transición duplicada para ${transition.fromState} (${transition.readSymbols.join(", ")}).`);
+      throw new Error(`No determinista: transición duplicada para ${normalized.fromState} (${normalized.readSymbols.join(", ")}).`);
     }
 
     transitions.set(key, {
-      nextState: transition.nextState,
-      actions: transition.actions,
+      nextState: normalized.nextState,
+      actions: normalized.actions,
     });
     transition.key = key;
   });
@@ -1468,32 +1529,37 @@ function renderTapes() {
   }
 
   ui.tapeArea.innerHTML = "";
-  const radius = 10;
+  const visibleCells = 15;
+  const radius = Math.floor(visibleCells / 2);
 
   for (let i = 0; i < machine.tapeCount; i += 1) {
-    const row = document.createElement("div");
-    row.className = "tape-row";
+    const card = document.createElement("div");
+    card.className = "tape-card";
 
     const title = document.createElement("div");
     title.className = "tape-title";
     title.textContent = `Cinta ${i + 1}`;
 
-    const tape = document.createElement("div");
-    tape.className = "tape";
+    const viewport = document.createElement("div");
+    viewport.className = "tape-viewport";
+    const track = document.createElement("div");
+    track.className = "tape-track";
+    track.style.setProperty("--cells", String(visibleCells));
 
     for (let pos = machine.heads[i] - radius; pos <= machine.heads[i] + radius; pos += 1) {
       const cell = document.createElement("div");
-      cell.className = "cell";
+      cell.className = "tape-cell";
       if (pos === machine.heads[i]) {
         cell.classList.add("active");
       }
       cell.textContent = machine.tapes[i].has(pos) ? machine.tapes[i].get(pos) : machine.blankSymbol;
-      tape.appendChild(cell);
+      track.appendChild(cell);
     }
+    viewport.appendChild(track);
 
-    row.appendChild(title);
-    row.appendChild(tape);
-    ui.tapeArea.appendChild(row);
+    card.appendChild(title);
+    card.appendChild(viewport);
+    ui.tapeArea.appendChild(card);
   }
 }
 
@@ -1542,6 +1608,7 @@ function initializeMachine() {
       ">",
     );
 
+    refreshTransitionEditors();
     setRunButtons(true);
     refreshStatus();
     renderTapes();
@@ -1564,7 +1631,7 @@ function resetMachine() {
   }
 
   try {
-    const tapes = parseTapeDefinitions(ui.tapesInput.value);
+    const tapes = readInitialTapesFromEditor();
     if (tapes.length !== machine.tapeCount) {
       throw new Error("El número de cintas cambió. Inicializa de nuevo la máquina.");
     }
@@ -1612,10 +1679,11 @@ function loadExample() {
   addOrReplaceTransition(parseTransitionLine("e0 (#,#) -> (, , ef)"), { render: false });
   editor.selectedTransitionKey = null;
 
-  ui.tapesInput.value = [
-    "cinta1=[>,1,1,1,1,1,#]",
-    "cinta2=[>,#,#,#,#,#,#]",
-  ].join("\n");
+  ui.tapeCount.value = "2";
+  renderInitialTapesEditor(2, [
+    { name: "cinta1", symbols: [">", "1", "1", "1", "1", "1", "#"] },
+    { name: "cinta2", symbols: [">", "#", "#", "#", "#", "#", "#"] },
+  ]);
 
   editor.selectedState = "e0";
   refreshSelectedState();
@@ -1688,7 +1756,20 @@ ui.transitionInput.addEventListener("keydown", (event) => {
   }
 });
 ui.transitionsPreview.addEventListener("change", importTransitionsFromPreview);
-ui.tapesInput.addEventListener("change", renderTransitionsTable);
+ui.tapeCount.addEventListener("change", () => {
+  const previous = (() => {
+    try {
+      return readInitialTapesFromEditor();
+    } catch {
+      return null;
+    }
+  })();
+  const nextCount = getConfiguredTapeCount();
+  ui.tapeCount.value = String(nextCount);
+  renderInitialTapesEditor(nextCount, previous);
+  autoAdjustTransitionsToTapeCount(nextCount);
+  refreshTransitionEditors();
+});
 ui.step.addEventListener("click", executeStep);
 ui.run.addEventListener("click", runMachine);
 ui.pause.addEventListener("click", () => {
