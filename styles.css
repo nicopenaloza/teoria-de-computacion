@@ -77,6 +77,15 @@ p {
   box-shadow: 0 1px 1px rgba(10, 20, 30, 0.04);
 }
 
+.legend {
+  margin-top: 0.85rem;
+}
+
+.legend p {
+  margin: 0.25rem 0;
+  color: var(--muted);
+}
+
 .section-head {
   display: flex;
   justify-content: space-between;

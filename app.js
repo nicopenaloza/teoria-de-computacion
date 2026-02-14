@@ -870,8 +870,20 @@ function saveTransitionFromEditor(rawLine = null, closeInline = false, forcedEdg
       seen.add(key);
     });
 
-    replaceTransitionsForEdge(pairKey, parsedList);
-    editor.selectedTransitionKey = pairKey;
+    // Inline editor (sobre la flecha) reemplaza el conjunto de la flecha completa.
+    // Editor rápido agrega/actualiza transiciones individuales y conserva las demás.
+    const replaceWholeEdge = forcedEdgeKey !== null;
+    if (replaceWholeEdge) {
+      replaceTransitionsForEdge(pairKey, parsedList);
+      editor.selectedTransitionKey = pairKey;
+    } else {
+      parsedList.forEach((parsed) => addOrReplaceTransition(parsed, { render: false }));
+      editor.selectedTransitionKey = edgeKey(
+        parsedList[parsedList.length - 1].fromState,
+        parsedList[parsedList.length - 1].nextState,
+      );
+    }
+
     refreshSelectedTransition();
     refreshTransitionEditors();
     renderStateGraph();
