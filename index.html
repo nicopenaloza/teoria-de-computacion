@@ -9,10 +9,19 @@
   <body>
     <main class="app" aria-labelledby="appTitle">
       <header class="app-header">
-        <h1 id="appTitle">Simulador de Máquina de Turing</h1>
-        <p>Editor visual multcinta con creación de estados y transiciones desde el diagrama.</p>
+        <div class="header-row">
+          <h1 id="appTitle">Laboratorio de Autómatas</h1>
+          <button id="openDiagramConfig" type="button">Configurar diagrama</button>
+        </div>
+        <p>Simuladores de Máquina de Turing, AF (con minimización) y PDA.</p>
+        <div class="sim-tabs" role="tablist" aria-label="Seleccionar simulador">
+          <button id="tabTM" type="button" class="tab-btn active" data-view="tm" role="tab" aria-selected="true">MT</button>
+          <button id="tabFA" type="button" class="tab-btn" data-view="fa" role="tab" aria-selected="false">AF</button>
+          <button id="tabPDA" type="button" class="tab-btn" data-view="pda" role="tab" aria-selected="false">PDA</button>
+        </div>
       </header>
 
+      <section id="viewTM" class="sim-view active-view">
       <div class="workspace">
         <section class="panel editor" aria-labelledby="editorTitle">
           <div class="section-head">
@@ -27,7 +36,7 @@
           </div>
 
           <p id="graphInstructions" class="hint">
-            Mouse: doble clic crea/edita, Shift+arrastrar crea flecha. Teclado: N nuevo, I inicio, A aceptación, Supr eliminar, E editar transición, flechas mueve estado.
+            Mouse: doble clic crea/edita, Shift+arrastrar crea flecha, arrastrar fondo desplaza el viewport. Teclado: N nuevo, I inicio, A aceptación, Supr eliminar, E editar transición, flechas mueve estado.
           </p>
           <p class="hint">Estado: <strong id="selectedState">(ninguno)</strong> · Flecha: <strong id="selectedTransition">(ninguna)</strong></p>
 
@@ -120,6 +129,7 @@
 
       <section class="panel legend" aria-labelledby="legendTitle">
         <h2 id="legendTitle">Leyenda de símbolos</h2>
+        <p><strong>MT</strong></p>
         <p><code>#</code> = espacio vacío</p>
         <p><code>&gt;</code> = símbolo inicial de la cinta</p>
         <p><code>-&gt;</code> = mover cabezal a la derecha</p>
@@ -127,8 +137,128 @@
         <p><code>valor-&gt;</code> = escribir <code>valor</code> y mover a la derecha</p>
         <p><code>valor&lt;-</code> = escribir <code>valor</code> y mover a la izquierda</p>
         <p><code>valor</code> = escribir <code>valor</code> y no mover</p>
+        <p><code>eps</code> o <code>ε</code> = vacío (en MT escribe <code>#</code>)</p>
+        <p><strong>AF</strong></p>
+        <p><code>origen,simbolo -&gt; destino</code> = transición simple</p>
+        <p><code>origen,simbolo -&gt; d1,d2</code> = no determinismo (varios destinos)</p>
+        <p><code>eps</code> o <code>ε</code> = transición epsilon (sin consumir entrada)</p>
+        <p><code>ab</code> = transición consumiendo dos símbolos consecutivos</p>
+        <p><strong>PDA</strong></p>
+        <p><code>estado,input,tope -&gt; siguiente,push</code> = regla de transición</p>
+        <p><code>input = eps</code> = no consume entrada</p>
+        <p><code>tope = eps</code> = no requiere símbolo en tope</p>
+        <p><code>push = eps</code> = no apila (equivale a solo desapilar si aplica)</p>
+      </section>
+      </section>
+
+      <section id="viewFA" class="sim-view">
+        <div class="workspace">
+          <section class="panel" aria-labelledby="faTitle">
+            <h2 id="faTitle">Simulador AF</h2>
+            <div class="section-head">
+              <div class="actions compact">
+                <button id="faAddState" type="button">Estado</button>
+                <button id="faSetStart" type="button">Inicio</button>
+                <button id="faToggleAccept" type="button">Aceptación</button>
+                <button id="faDeleteState" type="button">Eliminar</button>
+                <button id="faLoadGraphFromText" type="button">Desde texto</button>
+              </div>
+            </div>
+            <p class="hint">AF seleccionado: <strong id="faSelectedState">(ninguno)</strong>. Shift+arrastrar crea transición, arrastrar fondo desplaza.</p>
+            <div id="faGraph" class="state-graph" tabindex="0" aria-label="Editor gráfico AF"></div>
+            <label for="faStates">Estados (coma)</label>
+            <input id="faStates" type="text" value="q0,q1,q2" />
+            <label for="faAlphabet">Alfabeto (coma)</label>
+            <input id="faAlphabet" type="text" value="0,1" />
+            <label for="faStartState">Estado inicial</label>
+            <input id="faStartState" type="text" value="q0" />
+            <label for="faAcceptStates">Estados de aceptación (coma)</label>
+            <input id="faAcceptStates" type="text" value="q2" />
+            <label for="faTransitions">
+              Transiciones (<code>origen,etiqueta -> destino[,destino2]</code>; etiqueta puede ser <code>eps</code> o varios símbolos, ej. <code>ab</code>)
+            </label>
+            <textarea id="faTransitions" rows="10" spellcheck="false">q0,0 -> q0
+q0,1 -> q1
+q1,0 -> q2
+q1,1 -> q1
+q2,0 -> q2
+q2,1 -> q2</textarea>
+            <div class="actions">
+              <button id="faLoadExample" type="button">Ejemplo</button>
+              <button id="faEvaluate" type="button">Evaluar cadena</button>
+              <button id="faMinimize" type="button">Minimizar</button>
+            </div>
+            <label for="faInputWord">Cadena de entrada</label>
+            <input id="faInputWord" type="text" value="1010" />
+            <div class="status" aria-live="polite">
+              <p><strong>Resultado:</strong> <span id="faResult">-</span></p>
+              <p><strong>Detalle:</strong> <span id="faMessage">Configura el autómata y evalúa.</span></p>
+            </div>
+            <label for="faMinimizedOutput">Salida minimizada</label>
+            <textarea id="faMinimizedOutput" rows="10" spellcheck="false" readonly></textarea>
+          </section>
+        </div>
+      </section>
+
+      <section id="viewPDA" class="sim-view">
+        <div class="workspace">
+          <section class="panel" aria-labelledby="pdaTitle">
+            <h2 id="pdaTitle">Simulador PDA</h2>
+            <div class="section-head">
+              <div class="actions compact">
+                <button id="pdaAddState" type="button">Estado</button>
+                <button id="pdaSetStart" type="button">Inicio</button>
+                <button id="pdaToggleAccept" type="button">Aceptación</button>
+                <button id="pdaDeleteState" type="button">Eliminar</button>
+                <button id="pdaLoadGraphFromText" type="button">Desde texto</button>
+              </div>
+            </div>
+            <p class="hint">PDA seleccionado: <strong id="pdaSelectedState">(ninguno)</strong>. Shift+arrastrar crea transición, arrastrar fondo desplaza.</p>
+            <div id="pdaGraph" class="state-graph" tabindex="0" aria-label="Editor gráfico PDA"></div>
+            <label for="pdaStates">Estados (coma)</label>
+            <input id="pdaStates" type="text" value="q0,q1,qf" />
+            <label for="pdaStartState">Estado inicial</label>
+            <input id="pdaStartState" type="text" value="q0" />
+            <label for="pdaAcceptStates">Estados de aceptación (coma)</label>
+            <input id="pdaAcceptStates" type="text" value="qf" />
+            <label for="pdaInitialStack">Símbolo inicial de pila</label>
+            <input id="pdaInitialStack" type="text" value="Z" />
+            <label for="pdaTransitions">
+              Transiciones (<code>estado,input,top -> siguiente,push</code>; usa <code>eps</code> para vacío)
+            </label>
+            <textarea id="pdaTransitions" rows="10" spellcheck="false">q0,(,Z -> q0,(Z
+q0,(,( -> q0,((
+q0,),(( -> q0,eps
+q0,eps,Z -> qf,Z</textarea>
+            <label for="pdaInputWord">Cadena de entrada</label>
+            <input id="pdaInputWord" type="text" value="(())()" />
+            <div class="actions">
+              <button id="pdaLoadExample" type="button">Ejemplo</button>
+              <button id="pdaEvaluate" type="button">Evaluar</button>
+            </div>
+            <div class="status" aria-live="polite">
+              <p><strong>Resultado:</strong> <span id="pdaResult">-</span></p>
+              <p><strong>Detalle:</strong> <span id="pdaMessage">Configura el PDA y evalúa.</span></p>
+            </div>
+          </section>
+        </div>
       </section>
     </main>
+
+    <dialog id="diagramConfigDialog" class="config-dialog" aria-labelledby="diagramConfigTitle">
+      <form method="dialog" class="config-dialog-body">
+        <h2 id="diagramConfigTitle">Configuración de diagramas</h2>
+        <label for="diagramMinDistance">
+          Distancia mínima entre nodos (px)
+          <input id="diagramMinDistance" type="number" min="68" step="1" value="90" />
+        </label>
+        <p class="hint">Cuando se crea o mueve un nodo, los nodos vecinos se desplazan para respetar esta distancia mínima.</p>
+        <div class="actions">
+          <button id="diagramConfigSave" type="button">Guardar</button>
+          <button id="diagramConfigCancel" type="button">Cancelar</button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="app.js"></script>
   </body>

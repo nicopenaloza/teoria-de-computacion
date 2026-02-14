@@ -99,8 +99,20 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const GRAPH_WIDTH = 1100;
 const GRAPH_HEIGHT = 460;
 const NODE_RADIUS = 30;
+const WORLD_LIMIT = 100000;
 
 const ui = {
+  openDiagramConfig: document.getElementById("openDiagramConfig"),
+  diagramConfigDialog: document.getElementById("diagramConfigDialog"),
+  diagramMinDistance: document.getElementById("diagramMinDistance"),
+  diagramConfigSave: document.getElementById("diagramConfigSave"),
+  diagramConfigCancel: document.getElementById("diagramConfigCancel"),
+  tabTM: document.getElementById("tabTM"),
+  tabFA: document.getElementById("tabFA"),
+  tabPDA: document.getElementById("tabPDA"),
+  viewTM: document.getElementById("viewTM"),
+  viewFA: document.getElementById("viewFA"),
+  viewPDA: document.getElementById("viewPDA"),
   addState: document.getElementById("addState"),
   setStart: document.getElementById("setStart"),
   toggleAccept: document.getElementById("toggleAccept"),
@@ -133,6 +145,42 @@ const ui = {
   message: document.getElementById("message"),
   tapeArea: document.getElementById("tapeArea"),
   loadExample: document.getElementById("loadExample"),
+  faAddState: document.getElementById("faAddState"),
+  faSetStart: document.getElementById("faSetStart"),
+  faToggleAccept: document.getElementById("faToggleAccept"),
+  faDeleteState: document.getElementById("faDeleteState"),
+  faLoadGraphFromText: document.getElementById("faLoadGraphFromText"),
+  faSelectedState: document.getElementById("faSelectedState"),
+  faGraph: document.getElementById("faGraph"),
+  faStates: document.getElementById("faStates"),
+  faAlphabet: document.getElementById("faAlphabet"),
+  faStartState: document.getElementById("faStartState"),
+  faAcceptStates: document.getElementById("faAcceptStates"),
+  faTransitions: document.getElementById("faTransitions"),
+  faInputWord: document.getElementById("faInputWord"),
+  faLoadExample: document.getElementById("faLoadExample"),
+  faEvaluate: document.getElementById("faEvaluate"),
+  faMinimize: document.getElementById("faMinimize"),
+  faResult: document.getElementById("faResult"),
+  faMessage: document.getElementById("faMessage"),
+  faMinimizedOutput: document.getElementById("faMinimizedOutput"),
+  pdaStates: document.getElementById("pdaStates"),
+  pdaAddState: document.getElementById("pdaAddState"),
+  pdaSetStart: document.getElementById("pdaSetStart"),
+  pdaToggleAccept: document.getElementById("pdaToggleAccept"),
+  pdaDeleteState: document.getElementById("pdaDeleteState"),
+  pdaLoadGraphFromText: document.getElementById("pdaLoadGraphFromText"),
+  pdaSelectedState: document.getElementById("pdaSelectedState"),
+  pdaGraph: document.getElementById("pdaGraph"),
+  pdaStartState: document.getElementById("pdaStartState"),
+  pdaAcceptStates: document.getElementById("pdaAcceptStates"),
+  pdaInitialStack: document.getElementById("pdaInitialStack"),
+  pdaTransitions: document.getElementById("pdaTransitions"),
+  pdaInputWord: document.getElementById("pdaInputWord"),
+  pdaLoadExample: document.getElementById("pdaLoadExample"),
+  pdaEvaluate: document.getElementById("pdaEvaluate"),
+  pdaResult: document.getElementById("pdaResult"),
+  pdaMessage: document.getElementById("pdaMessage"),
 };
 
 const editor = {
@@ -146,6 +194,12 @@ const editor = {
 const interaction = {
   dragNode: null,
   dragPointerId: null,
+  panActive: false,
+  panPointerId: null,
+  panStartClientX: 0,
+  panStartClientY: 0,
+  panStartOffsetX: 0,
+  panStartOffsetY: 0,
   linkFrom: null,
   linkTo: null,
   inlineEditor: null,
@@ -153,6 +207,49 @@ const interaction = {
 
 let machine = null;
 let runTimer = null;
+const tmViewport = {
+  x: 0,
+  y: 0,
+};
+const diagramConfig = {
+  minNodeDistance: 90,
+};
+const faGraphEditor = {
+  nodes: new Map(),
+  transitions: [],
+  selectedState: null,
+  selectedEdgeKey: null,
+  viewX: 0,
+  viewY: 0,
+  panActive: false,
+  panPointerId: null,
+  panStartClientX: 0,
+  panStartClientY: 0,
+  panStartOffsetX: 0,
+  panStartOffsetY: 0,
+  dragNode: null,
+  dragPointerId: null,
+  linkFrom: null,
+  linkTo: null,
+};
+const pdaGraphEditor = {
+  nodes: new Map(),
+  transitions: [],
+  selectedState: null,
+  selectedEdgeKey: null,
+  viewX: 0,
+  viewY: 0,
+  panActive: false,
+  panPointerId: null,
+  panStartClientX: 0,
+  panStartClientY: 0,
+  panStartOffsetX: 0,
+  panStartOffsetY: 0,
+  dragNode: null,
+  dragPointerId: null,
+  linkFrom: null,
+  linkTo: null,
+};
 
 function message(text, type = "warn") {
   ui.message.textContent = text;
@@ -177,6 +274,93 @@ function isEditableElement(target) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function clampNodePosition(node) {
+  node.x = clamp(node.x, -WORLD_LIMIT, WORLD_LIMIT);
+  node.y = clamp(node.y, -WORLD_LIMIT, WORLD_LIMIT);
+}
+
+function enforceMinNodeDistance(nodesMap, pinnedName = null) {
+  const minDistance = Math.max(68, Number(diagramConfig.minNodeDistance) || 90);
+  if (!nodesMap || nodesMap.size < 2) {
+    return;
+  }
+
+  const entries = [...nodesMap.entries()];
+  const maxIterations = 36;
+  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    let adjusted = false;
+    for (let i = 0; i < entries.length; i += 1) {
+      const [nameA, nodeA] = entries[i];
+      for (let j = i + 1; j < entries.length; j += 1) {
+        const [nameB, nodeB] = entries[j];
+        let dx = nodeB.x - nodeA.x;
+        let dy = nodeB.y - nodeA.y;
+        let distance = Math.hypot(dx, dy);
+        if (distance >= minDistance) {
+          continue;
+        }
+
+        if (distance < 0.001) {
+          dx = 1;
+          dy = 0;
+          distance = 1;
+        }
+
+        const overlap = minDistance - distance;
+        const ux = dx / distance;
+        const uy = dy / distance;
+
+        const aPinned = pinnedName && nameA === pinnedName;
+        const bPinned = pinnedName && nameB === pinnedName;
+        let pushA = 0.5;
+        let pushB = 0.5;
+        if (aPinned && !bPinned) {
+          pushA = 0;
+          pushB = 1;
+        } else if (bPinned && !aPinned) {
+          pushA = 1;
+          pushB = 0;
+        }
+
+        nodeA.x -= ux * overlap * pushA;
+        nodeA.y -= uy * overlap * pushA;
+        nodeB.x += ux * overlap * pushB;
+        nodeB.y += uy * overlap * pushB;
+        clampNodePosition(nodeA);
+        clampNodePosition(nodeB);
+        adjusted = true;
+      }
+    }
+    if (!adjusted) {
+      break;
+    }
+  }
+}
+
+function applyMinDistanceToAllDiagrams() {
+  enforceMinNodeDistance(editor.nodes, editor.selectedState);
+  enforceMinNodeDistance(faGraphEditor.nodes, faGraphEditor.selectedState);
+  enforceMinNodeDistance(pdaGraphEditor.nodes, pdaGraphEditor.selectedState);
+}
+
+function openDialog(dialog) {
+  if (!dialog) return;
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+    return;
+  }
+  dialog.setAttribute("open", "open");
+}
+
+function closeDialog(dialog) {
+  if (!dialog) return;
+  if (typeof dialog.close === "function") {
+    dialog.close();
+    return;
+  }
+  dialog.removeAttribute("open");
 }
 
 function splitByCommaPreserve(value) {
@@ -251,10 +435,25 @@ function parseActionToken(rawToken) {
     return { writeSymbol: null, move: "S" };
   }
 
+  const normalizeWriteSymbol = (value) => {
+    const trimmed = value.trim();
+    if (trimmed === "") {
+      return null;
+    }
+    if (/^(eps|epsilon)$/i.test(trimmed) || trimmed === "ε") {
+      return "#";
+    }
+    return trimmed;
+  };
+
+  if (/^(eps|epsilon)$/i.test(token) || token === "ε") {
+    return { writeSymbol: "#", move: "S" };
+  }
+
   if (token.includes("|")) {
     const [writePart, movePart] = token.split("|").map((s) => s.trim());
     return {
-      writeSymbol: writePart || null,
+      writeSymbol: normalizeWriteSymbol(writePart),
       move: normalizeMove(movePart || "S"),
     };
   }
@@ -262,7 +461,7 @@ function parseActionToken(rawToken) {
   if (token.includes("&")) {
     const [writePart, movePart] = token.split("&").map((s) => s.trim());
     return {
-      writeSymbol: writePart || null,
+      writeSymbol: normalizeWriteSymbol(writePart),
       move: normalizeMove(movePart || "S"),
     };
   }
@@ -275,14 +474,14 @@ function parseActionToken(rawToken) {
   }
   if (token.endsWith("->")) {
     const writeSymbol = token.slice(0, -2).trim();
-    return { writeSymbol: writeSymbol || null, move: "R" };
+    return { writeSymbol: normalizeWriteSymbol(writeSymbol), move: "R" };
   }
   if (token.endsWith("<-")) {
     const writeSymbol = token.slice(0, -2).trim();
-    return { writeSymbol: writeSymbol || null, move: "L" };
+    return { writeSymbol: normalizeWriteSymbol(writeSymbol), move: "L" };
   }
 
-  return { writeSymbol: token, move: "S" };
+  return { writeSymbol: normalizeWriteSymbol(token), move: "S" };
 }
 
 function normalizeMove(moveRaw) {
@@ -308,7 +507,13 @@ function parseTransitionLine(line) {
   }
 
   const fromState = match[1].trim();
-  const readSymbols = splitByCommaPreserve(match[2]).map((s) => s.trim());
+  const readSymbols = splitByCommaPreserve(match[2]).map((s) => {
+    const symbol = s.trim();
+    if (symbol === "" || /^(eps|epsilon)$/i.test(symbol) || symbol === "ε") {
+      return "#";
+    }
+    return symbol;
+  });
   const rhsParts = splitByCommaPreserve(match[3]);
 
   if (rhsParts.length < 2) {
@@ -722,6 +927,7 @@ function addState(name, x, y) {
   });
 
   editor.selectedState = name;
+  enforceMinNodeDistance(editor.nodes, name);
   refreshSelectedState();
   renderStateGraph();
 }
@@ -989,7 +1195,7 @@ function renderStateGraph() {
   ui.stateGraph.innerHTML = "";
 
   const svg = createSvgElement("svg", {
-    viewBox: `0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`,
+    viewBox: `${tmViewport.x} ${tmViewport.y} ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`,
     role: "img",
     "aria-label": "Editor de máquina de Turing",
   });
@@ -1276,15 +1482,15 @@ function renderStateGraph() {
 function getSvgPointFromEvent(event) {
   const svg = ui.stateGraph.querySelector("svg");
   if (!svg) {
-    return { x: GRAPH_WIDTH / 2, y: GRAPH_HEIGHT / 2 };
+    return { x: tmViewport.x + GRAPH_WIDTH / 2, y: tmViewport.y + GRAPH_HEIGHT / 2 };
   }
 
   const rect = svg.getBoundingClientRect();
-  const x = ((event.clientX - rect.left) / rect.width) * GRAPH_WIDTH;
-  const y = ((event.clientY - rect.top) / rect.height) * GRAPH_HEIGHT;
+  const x = tmViewport.x + ((event.clientX - rect.left) / rect.width) * GRAPH_WIDTH;
+  const y = tmViewport.y + ((event.clientY - rect.top) / rect.height) * GRAPH_HEIGHT;
   return {
-    x: Math.max(NODE_RADIUS + 8, Math.min(GRAPH_WIDTH - NODE_RADIUS - 8, x)),
-    y: Math.max(NODE_RADIUS + 8, Math.min(GRAPH_HEIGHT - NODE_RADIUS - 8, y)),
+    x: clamp(x, -WORLD_LIMIT, WORLD_LIMIT),
+    y: clamp(y, -WORLD_LIMIT, WORLD_LIMIT),
   };
 }
 
@@ -1311,6 +1517,14 @@ function onGraphPointerDown(event) {
     editor.selectedState = null;
     clearTransitionSelection();
     refreshSelectedState();
+    interaction.panActive = true;
+    interaction.panPointerId = event.pointerId;
+    interaction.panStartClientX = event.clientX;
+    interaction.panStartClientY = event.clientY;
+    interaction.panStartOffsetX = tmViewport.x;
+    interaction.panStartOffsetY = tmViewport.y;
+    ui.stateGraph.setPointerCapture(event.pointerId);
+    ui.stateGraph.classList.add("panning");
     renderStateGraph();
     return;
   }
@@ -1338,6 +1552,23 @@ function onGraphPointerDown(event) {
 }
 
 function onGraphPointerMove(event) {
+  if (interaction.panActive) {
+    const svg = ui.stateGraph.querySelector("svg");
+    if (!svg) {
+      return;
+    }
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return;
+    }
+    const worldDx = (event.clientX - interaction.panStartClientX) * (GRAPH_WIDTH / rect.width);
+    const worldDy = (event.clientY - interaction.panStartClientY) * (GRAPH_HEIGHT / rect.height);
+    tmViewport.x = clamp(interaction.panStartOffsetX - worldDx, -WORLD_LIMIT, WORLD_LIMIT);
+    tmViewport.y = clamp(interaction.panStartOffsetY - worldDy, -WORLD_LIMIT, WORLD_LIMIT);
+    renderStateGraph();
+    return;
+  }
+
   if (interaction.dragNode) {
     const point = getSvgPointFromEvent(event);
     const node = editor.nodes.get(interaction.dragNode);
@@ -1346,6 +1577,7 @@ function onGraphPointerMove(event) {
     }
     node.x = point.x;
     node.y = point.y;
+    enforceMinNodeDistance(editor.nodes, interaction.dragNode);
     renderStateGraph();
     return;
   }
@@ -1357,6 +1589,21 @@ function onGraphPointerMove(event) {
 }
 
 function onGraphPointerUp(event) {
+  if (interaction.panActive) {
+    if (interaction.panPointerId !== null) {
+      try {
+        ui.stateGraph.releasePointerCapture(interaction.panPointerId);
+      } catch {
+        // ignore
+      }
+    }
+    interaction.panActive = false;
+    interaction.panPointerId = null;
+    ui.stateGraph.classList.remove("panning");
+    renderStateGraph();
+    return;
+  }
+
   if (interaction.dragNode) {
     if (interaction.dragPointerId !== null) {
       try {
@@ -1461,14 +1708,15 @@ function onGraphKeyDown(event) {
     handled = true;
   } else if (selectedNode && event.key.startsWith("Arrow")) {
     if (event.key === "ArrowUp") {
-      selectedNode.y = clamp(selectedNode.y - step, NODE_RADIUS + 8, GRAPH_HEIGHT - NODE_RADIUS - 8);
+      selectedNode.y = clamp(selectedNode.y - step, -WORLD_LIMIT, WORLD_LIMIT);
     } else if (event.key === "ArrowDown") {
-      selectedNode.y = clamp(selectedNode.y + step, NODE_RADIUS + 8, GRAPH_HEIGHT - NODE_RADIUS - 8);
+      selectedNode.y = clamp(selectedNode.y + step, -WORLD_LIMIT, WORLD_LIMIT);
     } else if (event.key === "ArrowLeft") {
-      selectedNode.x = clamp(selectedNode.x - step, NODE_RADIUS + 8, GRAPH_WIDTH - NODE_RADIUS - 8);
+      selectedNode.x = clamp(selectedNode.x - step, -WORLD_LIMIT, WORLD_LIMIT);
     } else if (event.key === "ArrowRight") {
-      selectedNode.x = clamp(selectedNode.x + step, NODE_RADIUS + 8, GRAPH_WIDTH - NODE_RADIUS - 8);
+      selectedNode.x = clamp(selectedNode.x + step, -WORLD_LIMIT, WORLD_LIMIT);
     }
+    enforceMinNodeDistance(editor.nodes, editor.selectedState);
     renderStateGraph();
     handled = true;
   }
@@ -1685,6 +1933,7 @@ function loadExample() {
 
   editor.nodes.set("e0", { x: 320, y: 240, isStart: true, isAccept: false });
   editor.nodes.set("ef", { x: 760, y: 240, isStart: false, isAccept: true });
+  enforceMinNodeDistance(editor.nodes, null);
 
   addOrReplaceTransition(parseTransitionLine("e0 (>,>) -> (->, ->, e0)"), { render: false });
   addOrReplaceTransition(parseTransitionLine("e0 (1,#) -> (->, 1->, e0)"), { render: false });
@@ -1709,6 +1958,1033 @@ function loadExample() {
   refreshStatus();
   renderTapes();
   message("Ejemplo cargado. Inicializa para simular.", "ok");
+}
+
+function switchView(view) {
+  const views = {
+    tm: ui.viewTM,
+    fa: ui.viewFA,
+    pda: ui.viewPDA,
+  };
+  const tabs = {
+    tm: ui.tabTM,
+    fa: ui.tabFA,
+    pda: ui.tabPDA,
+  };
+  Object.entries(views).forEach(([key, el]) => {
+    if (!el) return;
+    el.classList.toggle("active-view", key === view);
+  });
+  Object.entries(tabs).forEach(([key, el]) => {
+    if (!el) return;
+    el.classList.toggle("active", key === view);
+    el.setAttribute("aria-selected", key === view ? "true" : "false");
+  });
+}
+
+function parseNameListCSV(value) {
+  return splitByCommaPreserve(value).map((s) => s.trim()).filter(Boolean);
+}
+
+function layoutNodesInCircle(names, width = GRAPH_WIDTH, height = GRAPH_HEIGHT) {
+  const map = new Map();
+  if (names.length === 0) return map;
+  if (names.length === 1) {
+    map.set(names[0], { x: width / 2, y: height / 2 });
+    return map;
+  }
+  const cx = width / 2;
+  const cy = height / 2;
+  const r = Math.max(100, Math.min(width, height) / 2 - 70);
+  names.forEach((name, idx) => {
+    const angle = (-Math.PI / 2) + ((2 * Math.PI * idx) / names.length);
+    map.set(name, { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+  });
+  return map;
+}
+
+function nextStateName(editorData, prefix = "q") {
+  let i = 0;
+  while (editorData.nodes.has(`${prefix}${i}`)) i += 1;
+  return `${prefix}${i}`;
+}
+
+function groupSimpleEdges(transitions) {
+  const map = new Map();
+  transitions.forEach((t) => {
+    const k = `${t.fromState}=>${t.toState}`;
+    if (!map.has(k)) {
+      map.set(k, { key: k, fromState: t.fromState, toState: t.toState, labels: [] });
+    }
+    map.get(k).labels.push(t.label);
+  });
+  return [...map.values()];
+}
+
+function renderSimpleGraph(container, editorData, selectedTextEl) {
+  if (!container) return;
+  container.innerHTML = "";
+  selectedTextEl.textContent = editorData.selectedState || "(ninguno)";
+  if (!editorData.nodes.size) {
+    container.innerHTML = '<div class="graph-empty">Doble clic para crear estado.</div>';
+    return;
+  }
+
+  const svg = createSvgElement("svg", {
+    viewBox: `${editorData.viewX} ${editorData.viewY} ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`,
+    role: "img",
+    "aria-label": "Editor gráfico",
+  });
+  const defs = createSvgElement("defs");
+  const arrow = createSvgElement("marker", {
+    id: `arrow-simple-${container.id}`,
+    markerWidth: 10,
+    markerHeight: 10,
+    refX: 9,
+    refY: 5,
+    orient: "auto",
+    markerUnits: "strokeWidth",
+  });
+  arrow.appendChild(createSvgElement("path", { d: "M0,0 L10,5 L0,10 Z", fill: "#64748b" }));
+  defs.appendChild(arrow);
+  svg.appendChild(defs);
+
+  const edgeGroups = groupSimpleEdges(editorData.transitions);
+  const pairTotals = new Map();
+  const pairSeen = new Map();
+  edgeGroups.forEach((e) => {
+    const key = `${e.fromState}=>${e.toState}`;
+    pairTotals.set(key, (pairTotals.get(key) || 0) + 1);
+  });
+
+  edgeGroups.forEach((edge) => {
+    const from = editorData.nodes.get(edge.fromState);
+    const to = editorData.nodes.get(edge.toState);
+    if (!from || !to) return;
+    const pairKey = `${edge.fromState}=>${edge.toState}`;
+    const idx = pairSeen.get(pairKey) || 0;
+    pairSeen.set(pairKey, idx + 1);
+    const total = pairTotals.get(pairKey) || 1;
+    const reverseKey = `${edge.toState}=>${edge.fromState}`;
+    const hasReverse = pairTotals.has(reverseKey);
+    const isSelectedEdge = editorData.selectedEdgeKey === edge.key;
+    const path = createSvgElement("path", {
+      class: isSelectedEdge ? "edge-path edge-selected" : "edge-path",
+      "marker-end": `url(#arrow-simple-${container.id})`,
+      "data-edge": edge.key,
+    });
+    const label = createSvgElement("text", {
+      class: isSelectedEdge ? "edge-label edge-label-selected" : "edge-label",
+      "data-edge": edge.key,
+    });
+    let lx = 0;
+    let ly = 0;
+    if (edge.fromState === edge.toState) {
+      const x = from.x;
+      const y = from.y;
+      const h = 70 + idx * 14;
+      path.setAttribute("d", `M ${x + NODE_RADIUS * 0.7} ${y - NODE_RADIUS * 0.7} C ${x + 56} ${y - h}, ${x - 56} ${y - h}, ${x - NODE_RADIUS * 0.7} ${y - NODE_RADIUS * 0.7}`);
+      lx = x;
+      ly = y - h - 7;
+    } else {
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const nx = -uy;
+      const ny = ux;
+      const sx = from.x + ux * NODE_RADIUS;
+      const sy = from.y + uy * NODE_RADIUS;
+      const ex = to.x - ux * NODE_RADIUS;
+      const ey = to.y - uy * NODE_RADIUS;
+      let curve = 24 * (idx - (total - 1) / 2);
+      if (hasReverse && total === 1) curve += edge.fromState < edge.toState ? -20 : 20;
+      const mx = (sx + ex) / 2;
+      const my = (sy + ey) / 2;
+      const cx = mx + nx * curve;
+      const cy = my + ny * curve;
+      path.setAttribute("d", `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}`);
+      lx = (sx + 2 * cx + ex) / 4 + nx * (curve >= 0 ? 8 : -8);
+      ly = (sy + 2 * cy + ey) / 4 + ny * (curve >= 0 ? 8 : -8);
+    }
+    label.setAttribute("x", String(lx));
+    label.setAttribute("y", String(ly));
+    edge.labels.forEach((text, i) => {
+      const t = createSvgElement("tspan", { x: String(lx), dy: i === 0 ? "0" : "1.15em", "data-edge": edge.key });
+      t.textContent = text;
+      label.appendChild(t);
+    });
+    svg.appendChild(path);
+    svg.appendChild(label);
+  });
+
+  editorData.nodes.forEach((node, name) => {
+    const classes = ["node-circle"];
+    if (node.isStart) classes.push("node-start");
+    if (node.isAccept) classes.push("node-accept");
+    if (editorData.selectedState === name) classes.push("node-selected");
+    const circle = createSvgElement("circle", {
+      cx: node.x,
+      cy: node.y,
+      r: NODE_RADIUS,
+      class: classes.join(" "),
+      "data-node": name,
+    });
+    const text = createSvgElement("text", {
+      class: "node-label",
+      x: node.x,
+      y: node.y,
+      "data-node": name,
+    });
+    text.textContent = name;
+    svg.appendChild(circle);
+    if (node.isAccept) {
+      svg.appendChild(createSvgElement("circle", {
+        cx: node.x, cy: node.y, r: NODE_RADIUS - 7, fill: "none", stroke: "#22c55e", "stroke-width": 2, "data-node": name,
+      }));
+    }
+    if (node.isStart) {
+      svg.appendChild(createSvgElement("line", {
+        x1: node.x - 56, y1: node.y, x2: node.x - NODE_RADIUS - 4, y2: node.y,
+        stroke: "#9a6800", "stroke-width": 2, "marker-end": `url(#arrow-simple-${container.id})`, "data-node": name,
+      }));
+    }
+    svg.appendChild(text);
+  });
+
+  if (editorData.linkFrom && editorData.linkTo) {
+    const from = editorData.nodes.get(editorData.linkFrom);
+    if (from) {
+      svg.appendChild(createSvgElement("path", {
+        class: "edge-preview",
+        d: `M ${from.x} ${from.y} L ${editorData.linkTo.x} ${editorData.linkTo.y}`,
+      }));
+    }
+  }
+
+  container.appendChild(svg);
+}
+
+function getPointInGraph(container, event) {
+  const sourceEditor = editorForContainer(container);
+  const offsetX = Number(sourceEditor?.viewX || 0);
+  const offsetY = Number(sourceEditor?.viewY || 0);
+  const svg = container.querySelector("svg");
+  if (!svg) return { x: offsetX + GRAPH_WIDTH / 2, y: offsetY + GRAPH_HEIGHT / 2 };
+  const rect = svg.getBoundingClientRect();
+  const x = offsetX + ((event.clientX - rect.left) / rect.width) * GRAPH_WIDTH;
+  const y = offsetY + ((event.clientY - rect.top) / rect.height) * GRAPH_HEIGHT;
+  return {
+    x: clamp(x, -WORLD_LIMIT, WORLD_LIMIT),
+    y: clamp(y, -WORLD_LIMIT, WORLD_LIMIT),
+  };
+}
+
+function editorForContainer(container) {
+  if (container === ui.faGraph) {
+    return faGraphEditor;
+  }
+  if (container === ui.pdaGraph) {
+    return pdaGraphEditor;
+  }
+  return null;
+}
+
+function parseCsvList(value) {
+  return splitByCommaPreserve(value).map((s) => s.trim()).filter(Boolean);
+}
+
+function normalizeEpsilonLabel(labelRaw) {
+  const label = labelRaw.trim();
+  if (!label || /^(eps|epsilon)$/i.test(label) || label === "ε") {
+    return "eps";
+  }
+  return label;
+}
+
+function syncFaFormFromGraph() {
+  const states = [...faGraphEditor.nodes.keys()];
+  ui.faStates.value = states.join(",");
+  const start = states.find((s) => faGraphEditor.nodes.get(s).isStart) || "";
+  ui.faStartState.value = start;
+  const accept = states.filter((s) => faGraphEditor.nodes.get(s).isAccept);
+  ui.faAcceptStates.value = accept.join(",");
+  const byFromSymbol = new Map();
+  faGraphEditor.transitions.forEach((t) => {
+    const key = `${t.fromState}|${t.label}`;
+    if (!byFromSymbol.has(key)) byFromSymbol.set(key, new Set());
+    byFromSymbol.get(key).add(t.toState);
+  });
+  const lines = [...byFromSymbol.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, toSet]) => {
+      const [from, symbol] = key.split("|");
+      return `${from},${symbol} -> ${[...toSet].join(",")}`;
+    });
+  ui.faTransitions.value = lines.join("\n");
+}
+
+function loadFaGraphFromForm() {
+  const states = parseNameListCSV(ui.faStates.value);
+  const positions = layoutNodesInCircle(states);
+  faGraphEditor.nodes.clear();
+  states.forEach((s) => {
+    const p = positions.get(s) || { x: GRAPH_WIDTH / 2, y: GRAPH_HEIGHT / 2 };
+    faGraphEditor.nodes.set(s, {
+      x: p.x,
+      y: p.y,
+      isStart: ui.faStartState.value.trim() === s,
+      isAccept: parseNameListCSV(ui.faAcceptStates.value).includes(s),
+    });
+  });
+  enforceMinNodeDistance(faGraphEditor.nodes, null);
+  faGraphEditor.transitions = [];
+  try {
+    const parsed = parseFaTransitions(ui.faTransitions.value);
+    parsed.forEach((destSet, key) => {
+      const [from, symbol] = key.split("|");
+      destSet.forEach((to) => {
+        if (faGraphEditor.nodes.has(from) && faGraphEditor.nodes.has(to)) {
+          faGraphEditor.transitions.push({ fromState: from, toState: to, label: symbol });
+        }
+      });
+    });
+  } catch {
+    // ignore parse errors while loading graph
+  }
+  faGraphEditor.selectedState = null;
+  faGraphEditor.selectedEdgeKey = null;
+  faGraphEditor.panActive = false;
+  faGraphEditor.panPointerId = null;
+  ui.faGraph.classList.remove("panning");
+  renderSimpleGraph(ui.faGraph, faGraphEditor, ui.faSelectedState);
+}
+
+function syncPdaFormFromGraph() {
+  const states = [...pdaGraphEditor.nodes.keys()];
+  ui.pdaStates.value = states.join(",");
+  const start = states.find((s) => pdaGraphEditor.nodes.get(s).isStart) || "";
+  ui.pdaStartState.value = start;
+  const accept = states.filter((s) => pdaGraphEditor.nodes.get(s).isAccept);
+  ui.pdaAcceptStates.value = accept.join(",");
+  const lines = pdaGraphEditor.transitions
+    .map((t) => `${t.fromState},${t.label.split("->")[0].trim()} -> ${t.toState},${t.label.split("->")[1].trim()}`)
+    .sort((a, b) => a.localeCompare(b));
+  ui.pdaTransitions.value = lines.join("\n");
+}
+
+function loadPdaGraphFromForm() {
+  const states = parseNameListCSV(ui.pdaStates.value);
+  const positions = layoutNodesInCircle(states);
+  pdaGraphEditor.nodes.clear();
+  states.forEach((s) => {
+    const p = positions.get(s) || { x: GRAPH_WIDTH / 2, y: GRAPH_HEIGHT / 2 };
+    pdaGraphEditor.nodes.set(s, {
+      x: p.x,
+      y: p.y,
+      isStart: ui.pdaStartState.value.trim() === s,
+      isAccept: parseNameListCSV(ui.pdaAcceptStates.value).includes(s),
+    });
+  });
+  enforceMinNodeDistance(pdaGraphEditor.nodes, null);
+  pdaGraphEditor.transitions = [];
+  try {
+    const parsed = parsePdaTransitions(ui.pdaTransitions.value);
+    parsed.forEach((t) => {
+      if (pdaGraphEditor.nodes.has(t.state) && pdaGraphEditor.nodes.has(t.nextState)) {
+        pdaGraphEditor.transitions.push({
+          fromState: t.state,
+          toState: t.nextState,
+          label: `${t.inputSym},${t.stackTop} -> ${t.push}`,
+        });
+      }
+    });
+  } catch {
+    // ignore parse errors while loading graph
+  }
+  pdaGraphEditor.selectedState = null;
+  pdaGraphEditor.selectedEdgeKey = null;
+  pdaGraphEditor.panActive = false;
+  pdaGraphEditor.panPointerId = null;
+  ui.pdaGraph.classList.remove("panning");
+  renderSimpleGraph(ui.pdaGraph, pdaGraphEditor, ui.pdaSelectedState);
+}
+
+function bindSimpleGraphEditor(container, editorData, selectedEl, options) {
+  const { prefix, kind } = options;
+  container.addEventListener("pointerdown", (event) => {
+    container.focus();
+    const edgeTarget = event.target.closest("[data-edge]");
+    if (edgeTarget) {
+      editorData.selectedEdgeKey = edgeTarget.getAttribute("data-edge");
+      editorData.selectedState = null;
+      renderSimpleGraph(container, editorData, selectedEl);
+      return;
+    }
+    const nodeTarget = event.target.closest("[data-node]");
+    if (!nodeTarget) {
+      editorData.selectedState = null;
+      editorData.selectedEdgeKey = null;
+      editorData.panActive = true;
+      editorData.panPointerId = event.pointerId;
+      editorData.panStartClientX = event.clientX;
+      editorData.panStartClientY = event.clientY;
+      editorData.panStartOffsetX = editorData.viewX;
+      editorData.panStartOffsetY = editorData.viewY;
+      container.setPointerCapture(event.pointerId);
+      container.classList.add("panning");
+      renderSimpleGraph(container, editorData, selectedEl);
+      return;
+    }
+    const state = nodeTarget.getAttribute("data-node");
+    if (!state || !editorData.nodes.has(state)) return;
+    editorData.selectedState = state;
+    editorData.selectedEdgeKey = null;
+    if (event.shiftKey) {
+      editorData.linkFrom = state;
+      editorData.linkTo = getPointInGraph(container, event);
+      renderSimpleGraph(container, editorData, selectedEl);
+      return;
+    }
+    editorData.dragNode = state;
+    editorData.dragPointerId = event.pointerId;
+    container.setPointerCapture(event.pointerId);
+    renderSimpleGraph(container, editorData, selectedEl);
+  });
+
+  container.addEventListener("pointermove", (event) => {
+    if (editorData.panActive) {
+      const svg = container.querySelector("svg");
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const worldDx = (event.clientX - editorData.panStartClientX) * (GRAPH_WIDTH / rect.width);
+      const worldDy = (event.clientY - editorData.panStartClientY) * (GRAPH_HEIGHT / rect.height);
+      editorData.viewX = clamp(editorData.panStartOffsetX - worldDx, -WORLD_LIMIT, WORLD_LIMIT);
+      editorData.viewY = clamp(editorData.panStartOffsetY - worldDy, -WORLD_LIMIT, WORLD_LIMIT);
+      renderSimpleGraph(container, editorData, selectedEl);
+      return;
+    }
+
+    if (editorData.dragNode) {
+      const p = getPointInGraph(container, event);
+      const node = editorData.nodes.get(editorData.dragNode);
+      if (!node) return;
+      node.x = p.x;
+      node.y = p.y;
+      enforceMinNodeDistance(editorData.nodes, editorData.dragNode);
+      renderSimpleGraph(container, editorData, selectedEl);
+      return;
+    }
+    if (editorData.linkFrom) {
+      editorData.linkTo = getPointInGraph(container, event);
+      renderSimpleGraph(container, editorData, selectedEl);
+    }
+  });
+
+  container.addEventListener("pointerup", (event) => {
+    if (editorData.panActive) {
+      if (editorData.panPointerId !== null) {
+        try { container.releasePointerCapture(editorData.panPointerId); } catch {}
+      }
+      editorData.panActive = false;
+      editorData.panPointerId = null;
+      container.classList.remove("panning");
+      renderSimpleGraph(container, editorData, selectedEl);
+      return;
+    }
+
+    if (editorData.dragNode) {
+      try { container.releasePointerCapture(editorData.dragPointerId); } catch {}
+      editorData.dragNode = null;
+      editorData.dragPointerId = null;
+      renderSimpleGraph(container, editorData, selectedEl);
+      return;
+    }
+    if (editorData.linkFrom) {
+      const from = editorData.linkFrom;
+      const nodeTarget = event.target.closest("[data-node]");
+      if (nodeTarget) {
+        const to = nodeTarget.getAttribute("data-node");
+        if (to && editorData.nodes.has(to)) {
+          if (kind === "fa") {
+            const label = window.prompt("Etiqueta (eps/ε, símbolo o varios separados por coma):", "0");
+            if (label !== null) {
+              splitByCommaPreserve(label).map((x) => x.trim()).filter(Boolean).forEach((sym) => {
+                editorData.transitions.push({ fromState: from, toState: to, label: sym });
+              });
+              editorData.selectedEdgeKey = `${from}=>${to}`;
+              syncFaFormFromGraph();
+            }
+          } else {
+            const label = window.prompt("Etiqueta PDA: input,top -> push", "eps,Z -> Z");
+            if (label !== null && label.includes("->")) {
+              editorData.transitions.push({ fromState: from, toState: to, label: label.trim() });
+              editorData.selectedEdgeKey = `${from}=>${to}`;
+              syncPdaFormFromGraph();
+            }
+          }
+        }
+      }
+      editorData.linkFrom = null;
+      editorData.linkTo = null;
+      renderSimpleGraph(container, editorData, selectedEl);
+    }
+  });
+
+  container.addEventListener("dblclick", (event) => {
+    const edgeTarget = event.target.closest("[data-edge]");
+    if (edgeTarget) {
+      const key = edgeTarget.getAttribute("data-edge");
+      editorData.selectedEdgeKey = key;
+      const edgeEntries = editorData.transitions.filter((t) => `${t.fromState}=>${t.toState}` === key);
+      const current = edgeEntries.map((e) => e.label).join("\n");
+      const updated = window.prompt("Editar etiquetas (una por línea):", current);
+      if (updated !== null) {
+        editorData.transitions = editorData.transitions.filter((t) => `${t.fromState}=>${t.toState}` !== key);
+        updated.split("\n").map((x) => x.trim()).filter(Boolean).forEach((label) => {
+          const [fromState, toState] = key.split("=>");
+          editorData.transitions.push({ fromState, toState, label });
+        });
+        if (kind === "fa") syncFaFormFromGraph(); else syncPdaFormFromGraph();
+        renderSimpleGraph(container, editorData, selectedEl);
+      }
+      return;
+    }
+    const nodeTarget = event.target.closest("[data-node]");
+    if (nodeTarget) return;
+    const p = getPointInGraph(container, event);
+    const name = nextStateName(editorData, prefix);
+    const hasStart = [...editorData.nodes.values()].some((n) => n.isStart);
+    editorData.nodes.set(name, { x: p.x, y: p.y, isStart: !hasStart, isAccept: false });
+    editorData.selectedState = name;
+    editorData.selectedEdgeKey = null;
+    enforceMinNodeDistance(editorData.nodes, name);
+    if (kind === "fa") syncFaFormFromGraph(); else syncPdaFormFromGraph();
+    renderSimpleGraph(container, editorData, selectedEl);
+  });
+
+  container.addEventListener("keydown", (event) => {
+    if (isEditableElement(event.target)) {
+      return;
+    }
+    if (event.key !== "Delete" && event.key !== "Backspace") {
+      return;
+    }
+    if (!editorData.selectedEdgeKey) {
+      return;
+    }
+    const edgeKey = editorData.selectedEdgeKey;
+    editorData.transitions = editorData.transitions.filter(
+      (t) => `${t.fromState}=>${t.toState}` !== edgeKey,
+    );
+    editorData.selectedEdgeKey = null;
+    if (kind === "fa") {
+      syncFaFormFromGraph();
+    } else {
+      syncPdaFormFromGraph();
+    }
+    renderSimpleGraph(container, editorData, selectedEl);
+    event.preventDefault();
+  });
+}
+
+function parseFaTransitions(raw) {
+  const map = new Map();
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  lines.forEach((line, idx) => {
+    const [left, right] = line.split("->").map((x) => x.trim());
+    if (!left || !right) {
+      throw new Error(`Transición inválida en línea ${idx + 1}.`);
+    }
+    const [from, symbolRaw] = splitByCommaPreserve(left);
+    const symbol = normalizeEpsilonLabel(symbolRaw || "");
+    if (!from || !symbol) {
+      throw new Error(`Línea ${idx + 1}: faltan origen o símbolo.`);
+    }
+    const destinations = splitByCommaPreserve(right).map((d) => d.trim()).filter(Boolean);
+    if (!destinations.length) {
+      throw new Error(`Línea ${idx + 1}: falta estado destino.`);
+    }
+    const key = `${from}|${symbol}`;
+    if (!map.has(key)) {
+      map.set(key, new Set());
+    }
+    destinations.forEach((d) => map.get(key).add(d));
+  });
+  return map;
+}
+
+function buildFaModel() {
+  const states = new Set(parseCsvList(ui.faStates.value));
+  const alphabet = new Set(parseCsvList(ui.faAlphabet.value).map((s) => normalizeEpsilonLabel(s)));
+  const startState = ui.faStartState.value.trim();
+  const acceptStates = new Set(parseCsvList(ui.faAcceptStates.value));
+  const transitions = parseFaTransitions(ui.faTransitions.value);
+
+  if (!startState || !states.has(startState)) {
+    throw new Error("Estado inicial inválido en AF.");
+  }
+  acceptStates.forEach((s) => {
+    if (!states.has(s)) {
+      throw new Error(`Estado de aceptación inválido: ${s}`);
+    }
+  });
+  transitions.forEach((destSet, key) => {
+    const [from, symbol] = key.split("|");
+    if (!states.has(from)) {
+      throw new Error(`Estado origen inválido en transición: ${from}`);
+    }
+    if (symbol !== "eps") {
+      alphabet.add(symbol);
+    }
+    destSet.forEach((dest) => {
+      if (!states.has(dest)) {
+        throw new Error(`Estado destino inválido en transición: ${dest}`);
+      }
+    });
+  });
+
+  return { states, alphabet, startState, acceptStates, transitions };
+}
+
+function evaluateFA(model, word) {
+  const transitionsList = [];
+  model.transitions.forEach((destSet, key) => {
+    const [from, label] = key.split("|");
+    destSet.forEach((to) => transitionsList.push({ from, label, to }));
+  });
+
+  const q = [{ state: model.startState, pos: 0 }];
+  const seen = new Set();
+  let accepted = false;
+  let frontier = new Set();
+
+  while (q.length) {
+    const cfg = q.shift();
+    const cfgKey = `${cfg.state}|${cfg.pos}`;
+    if (seen.has(cfgKey)) continue;
+    seen.add(cfgKey);
+    frontier.add(cfg.state);
+    if (cfg.pos === word.length && model.acceptStates.has(cfg.state)) {
+      accepted = true;
+      break;
+    }
+
+    transitionsList.forEach((t) => {
+      if (t.from !== cfg.state) return;
+      if (t.label === "eps") {
+        q.push({ state: t.to, pos: cfg.pos });
+        return;
+      }
+      if (word.startsWith(t.label, cfg.pos)) {
+        q.push({ state: t.to, pos: cfg.pos + t.label.length });
+      }
+    });
+  }
+
+  return {
+    accepted,
+    detail: `Estados explorados: ${[...frontier].join(", ") || "∅"}`,
+  };
+}
+
+function expandLabelsToUnitNFA(model) {
+  const states = new Set(model.states);
+  const transitions = new Map();
+  const alphabet = new Set();
+  let aux = 0;
+  const addTransition = (from, symbol, to) => {
+    const key = `${from}|${symbol}`;
+    if (!transitions.has(key)) transitions.set(key, new Set());
+    transitions.get(key).add(to);
+    if (symbol !== "eps") alphabet.add(symbol);
+  };
+
+  model.transitions.forEach((destSet, key) => {
+    const [from, labelRaw] = key.split("|");
+    const label = normalizeEpsilonLabel(labelRaw);
+    destSet.forEach((to) => {
+      if (label === "eps") {
+        addTransition(from, "eps", to);
+        return;
+      }
+      if (label.length <= 1) {
+        addTransition(from, label, to);
+        return;
+      }
+      let prev = from;
+      for (let i = 0; i < label.length; i += 1) {
+        const ch = label[i];
+        const next = i === label.length - 1 ? to : `__aux${aux++}`;
+        states.add(next);
+        addTransition(prev, ch, next);
+        prev = next;
+      }
+    });
+  });
+
+  return {
+    states,
+    alphabet,
+    startState: model.startState,
+    acceptStates: new Set(model.acceptStates),
+    transitions,
+  };
+}
+
+function epsilonClosure(transitions, inputStates) {
+  const closure = new Set(inputStates);
+  const stack = [...inputStates];
+  while (stack.length) {
+    const state = stack.pop();
+    const next = transitions.get(`${state}|eps`) || new Set();
+    next.forEach((n) => {
+      if (!closure.has(n)) {
+        closure.add(n);
+        stack.push(n);
+      }
+    });
+  }
+  return closure;
+}
+
+function determinizeNFA(nfaUnit) {
+  const alphabet = [...nfaUnit.alphabet].filter((a) => a !== "eps");
+  const startSet = epsilonClosure(nfaUnit.transitions, new Set([nfaUnit.startState]));
+  const setKey = (set) => [...set].sort().join("&") || "∅";
+  const queue = [startSet];
+  const seen = new Set([setKey(startSet)]);
+  const states = new Map([[setKey(startSet), startSet]]);
+  const transitions = new Map();
+
+  while (queue.length) {
+    const currentSet = queue.shift();
+    const currentKey = setKey(currentSet);
+    alphabet.forEach((symbol) => {
+      const moveSet = new Set();
+      currentSet.forEach((state) => {
+        const next = nfaUnit.transitions.get(`${state}|${symbol}`);
+        if (next) {
+          next.forEach((n) => moveSet.add(n));
+        }
+      });
+      const targetSet = epsilonClosure(nfaUnit.transitions, moveSet);
+      const targetKey = setKey(targetSet);
+      transitions.set(`${currentKey}|${symbol}`, targetKey);
+      if (!seen.has(targetKey)) {
+        seen.add(targetKey);
+        states.set(targetKey, targetSet);
+        queue.push(targetSet);
+      }
+    });
+  }
+
+  const acceptStates = new Set(
+    [...states.entries()]
+      .filter(([, subset]) => [...subset].some((s) => nfaUnit.acceptStates.has(s)))
+      .map(([name]) => name),
+  );
+
+  return {
+    states: new Set(states.keys()),
+    alphabet: new Set(alphabet),
+    startState: setKey(startSet),
+    acceptStates,
+    transitions,
+  };
+}
+
+function minimizeDFA(dfa) {
+  const alphabet = [...dfa.alphabet];
+  const reachable = new Set([dfa.startState]);
+  const queue = [dfa.startState];
+  while (queue.length) {
+    const s = queue.shift();
+    alphabet.forEach((a) => {
+      const n = dfa.transitions.get(`${s}|${a}`);
+      if (n && !reachable.has(n)) {
+        reachable.add(n);
+        queue.push(n);
+      }
+    });
+  }
+  const allStates = [...reachable];
+  let partitions = [];
+  const acc = new Set(allStates.filter((s) => dfa.acceptStates.has(s)));
+  const nonAcc = new Set(allStates.filter((s) => !dfa.acceptStates.has(s)));
+  if (acc.size) partitions.push(acc);
+  if (nonAcc.size) partitions.push(nonAcc);
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const newParts = [];
+    partitions.forEach((part) => {
+      const groups = new Map();
+      part.forEach((state) => {
+        const signature = alphabet
+          .map((a) => {
+            const t = dfa.transitions.get(`${state}|${a}`);
+            return partitions.findIndex((p) => p.has(t));
+          })
+          .join("|");
+        if (!groups.has(signature)) groups.set(signature, new Set());
+        groups.get(signature).add(state);
+      });
+      if (groups.size > 1) changed = true;
+      groups.forEach((g) => newParts.push(g));
+    });
+    partitions = newParts;
+  }
+
+  const partName = (part) => [...part].sort().join("_");
+  const minimizedStates = new Set(partitions.map(partName));
+  const stateToPart = new Map();
+  partitions.forEach((p) => p.forEach((s) => stateToPart.set(s, partName(p))));
+
+  const transitions = new Map();
+  partitions.forEach((p) => {
+    const rep = [...p][0];
+    const from = partName(p);
+    alphabet.forEach((a) => {
+      const t = dfa.transitions.get(`${rep}|${a}`);
+      if (t) transitions.set(`${from}|${a}`, stateToPart.get(t));
+    });
+  });
+
+  const acceptStates = new Set(
+    partitions.filter((p) => [...p].some((s) => dfa.acceptStates.has(s))).map(partName),
+  );
+
+  return {
+    states: minimizedStates,
+    alphabet: new Set(alphabet),
+    startState: stateToPart.get(dfa.startState),
+    acceptStates,
+    transitions,
+  };
+}
+
+function formatDFA(dfa) {
+  const lines = [];
+  lines.push(`Estados: ${[...dfa.states].join(", ")}`);
+  lines.push(`Alfabeto: ${[...dfa.alphabet].join(", ")}`);
+  lines.push(`Inicial: ${dfa.startState}`);
+  lines.push(`Aceptación: ${[...dfa.acceptStates].join(", ") || "-"}`);
+  lines.push("Transiciones:");
+  [...dfa.transitions.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([k, v]) => {
+      const [from, symbol] = k.split("|");
+      lines.push(`${from},${symbol} -> ${v}`);
+    });
+  return lines.join("\n");
+}
+
+function handleFaEvaluate() {
+  try {
+    const model = buildFaModel();
+    const result = evaluateFA(model, ui.faInputWord.value);
+    ui.faResult.textContent = result.accepted ? "Aceptada" : "Rechazada";
+    ui.faMessage.textContent = result.detail;
+  } catch (err) {
+    ui.faResult.textContent = "Error";
+    ui.faMessage.textContent = err.message;
+  }
+}
+
+function handleFaMinimize() {
+  try {
+    const model = buildFaModel();
+    const nfaUnit = expandLabelsToUnitNFA(model);
+    const dfa = determinizeNFA(nfaUnit);
+    const minimized = minimizeDFA(dfa);
+    ui.faMinimizedOutput.value = formatDFA(minimized);
+    ui.faMessage.textContent = "AF convertido a DFA y minimizado.";
+  } catch (err) {
+    ui.faMinimizedOutput.value = "";
+    ui.faMessage.textContent = err.message;
+  }
+}
+
+function loadFaExample() {
+  ui.faStates.value = "q0,q1,q2,q3,q4";
+  ui.faAlphabet.value = "a,b";
+  ui.faStartState.value = "q0";
+  ui.faAcceptStates.value = "q4";
+  ui.faTransitions.value = [
+    "q0,eps -> q1",
+    "q1,ab -> q2",
+    "q1,a -> q3",
+    "q3,b -> q4",
+    "q2,eps -> q4",
+  ].join("\n");
+  ui.faInputWord.value = "ab";
+  ui.faResult.textContent = "-";
+  ui.faMessage.textContent = "Ejemplo AF cargado (eps y etiquetas multi-símbolo).";
+  ui.faMinimizedOutput.value = "";
+}
+
+function parsePdaTransitions(raw) {
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  return lines.map((line, idx) => {
+    const [left, right] = line.split("->").map((x) => x.trim());
+    if (!left || !right) {
+      throw new Error(`Transición PDA inválida en línea ${idx + 1}.`);
+    }
+    const [state, inputSym, stackTop] = splitByCommaPreserve(left).map((x) => x.trim());
+    const [nextState, pushRaw] = splitByCommaPreserve(right).map((x) => x.trim());
+    if (!state || !inputSym || !stackTop || !nextState || pushRaw === undefined) {
+      throw new Error(`Línea ${idx + 1}: faltan campos PDA.`);
+    }
+    return { state, inputSym, stackTop, nextState, push: pushRaw };
+  });
+}
+
+function buildPdaModel() {
+  const states = new Set(parseCsvList(ui.pdaStates.value));
+  const startState = ui.pdaStartState.value.trim();
+  const acceptStates = new Set(parseCsvList(ui.pdaAcceptStates.value));
+  const initialStack = ui.pdaInitialStack.value.trim();
+  const transitions = parsePdaTransitions(ui.pdaTransitions.value);
+  if (!states.has(startState)) {
+    throw new Error("Estado inicial inválido en PDA.");
+  }
+  return { states, startState, acceptStates, initialStack, transitions };
+}
+
+function evaluatePDA(model, input) {
+  const maxSteps = 20000;
+  const queue = [{ state: model.startState, pos: 0, stack: [model.initialStack] }];
+  const seen = new Set();
+  let steps = 0;
+
+  while (queue.length && steps < maxSteps) {
+    steps += 1;
+    const cfg = queue.shift();
+    const top = cfg.stack.length ? cfg.stack[cfg.stack.length - 1] : "eps";
+    const key = `${cfg.state}|${cfg.pos}|${cfg.stack.join("")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    if (cfg.pos === input.length && model.acceptStates.has(cfg.state)) {
+      return { accepted: true, detail: `Aceptada en ${cfg.state}.` };
+    }
+
+    model.transitions.forEach((t) => {
+      if (t.state !== cfg.state) return;
+      const inputMatch = t.inputSym === "eps" || input[cfg.pos] === t.inputSym;
+      if (!inputMatch) return;
+      const topMatch = t.stackTop === "eps" || top === t.stackTop;
+      if (!topMatch) return;
+
+      const nextPos = t.inputSym === "eps" ? cfg.pos : cfg.pos + 1;
+      const nextStack = [...cfg.stack];
+      if (t.stackTop !== "eps") nextStack.pop();
+      if (t.push !== "eps" && t.push !== "") {
+        for (let i = t.push.length - 1; i >= 0; i -= 1) {
+          nextStack.push(t.push[i]);
+        }
+      }
+      queue.push({ state: t.nextState, pos: nextPos, stack: nextStack });
+    });
+  }
+
+  return { accepted: false, detail: "No se encontró configuración de aceptación." };
+}
+
+function handlePdaEvaluate() {
+  try {
+    const model = buildPdaModel();
+    const result = evaluatePDA(model, ui.pdaInputWord.value);
+    ui.pdaResult.textContent = result.accepted ? "Aceptada" : "Rechazada";
+    ui.pdaMessage.textContent = result.detail;
+  } catch (err) {
+    ui.pdaResult.textContent = "Error";
+    ui.pdaMessage.textContent = err.message;
+  }
+}
+
+function loadPdaExample() {
+  ui.pdaStates.value = "q0,qf";
+  ui.pdaStartState.value = "q0";
+  ui.pdaAcceptStates.value = "qf";
+  ui.pdaInitialStack.value = "Z";
+  ui.pdaTransitions.value = [
+    "q0,(,Z -> q0,(Z",
+    "q0,(,( -> q0,((",
+    "q0,),(( -> q0,eps",
+    "q0,eps,Z -> qf,Z",
+  ].join("\n");
+  ui.pdaInputWord.value = "(())()";
+  ui.pdaResult.textContent = "-";
+  ui.pdaMessage.textContent = "Ejemplo PDA cargado.";
+}
+
+function editorAddState(editorData, prefix, kind) {
+  const name = nextStateName(editorData, prefix);
+  const hasStart = [...editorData.nodes.values()].some((n) => n.isStart);
+  editorData.nodes.set(name, { x: GRAPH_WIDTH / 2, y: GRAPH_HEIGHT / 2, isStart: !hasStart, isAccept: false });
+  editorData.selectedState = name;
+  editorData.selectedEdgeKey = null;
+  enforceMinNodeDistance(editorData.nodes, name);
+  if (kind === "fa") {
+    syncFaFormFromGraph();
+    renderSimpleGraph(ui.faGraph, faGraphEditor, ui.faSelectedState);
+  } else {
+    syncPdaFormFromGraph();
+    renderSimpleGraph(ui.pdaGraph, pdaGraphEditor, ui.pdaSelectedState);
+  }
+}
+
+function editorSetStart(editorData, kind) {
+  if (!editorData.selectedState || !editorData.nodes.has(editorData.selectedState)) return;
+  editorData.nodes.forEach((node) => { node.isStart = false; });
+  editorData.nodes.get(editorData.selectedState).isStart = true;
+  if (kind === "fa") {
+    syncFaFormFromGraph();
+    renderSimpleGraph(ui.faGraph, faGraphEditor, ui.faSelectedState);
+  } else {
+    syncPdaFormFromGraph();
+    renderSimpleGraph(ui.pdaGraph, pdaGraphEditor, ui.pdaSelectedState);
+  }
+}
+
+function editorToggleAccept(editorData, kind) {
+  if (!editorData.selectedState || !editorData.nodes.has(editorData.selectedState)) return;
+  const node = editorData.nodes.get(editorData.selectedState);
+  node.isAccept = !node.isAccept;
+  if (kind === "fa") {
+    syncFaFormFromGraph();
+    renderSimpleGraph(ui.faGraph, faGraphEditor, ui.faSelectedState);
+  } else {
+    syncPdaFormFromGraph();
+    renderSimpleGraph(ui.pdaGraph, pdaGraphEditor, ui.pdaSelectedState);
+  }
+}
+
+function editorDeleteState(editorData, kind) {
+  if (!editorData.selectedState || !editorData.nodes.has(editorData.selectedState)) return;
+  const s = editorData.selectedState;
+  editorData.nodes.delete(s);
+  editorData.transitions = editorData.transitions.filter((t) => t.fromState !== s && t.toState !== s);
+  editorData.selectedState = null;
+  editorData.selectedEdgeKey = null;
+  if (kind === "fa") {
+    syncFaFormFromGraph();
+    renderSimpleGraph(ui.faGraph, faGraphEditor, ui.faSelectedState);
+  } else {
+    syncPdaFormFromGraph();
+    renderSimpleGraph(ui.pdaGraph, pdaGraphEditor, ui.pdaSelectedState);
+  }
 }
 
 ui.addState.addEventListener("click", () => {
@@ -1796,8 +3072,53 @@ ui.speed.addEventListener("input", () => {
   }
 });
 ui.loadExample.addEventListener("click", loadExample);
+ui.openDiagramConfig.addEventListener("click", () => {
+  ui.diagramMinDistance.value = String(diagramConfig.minNodeDistance);
+  openDialog(ui.diagramConfigDialog);
+});
+ui.diagramConfigCancel.addEventListener("click", () => {
+  closeDialog(ui.diagramConfigDialog);
+});
+ui.diagramConfigSave.addEventListener("click", () => {
+  const parsed = Number.parseInt(ui.diagramMinDistance.value, 10);
+  const next = clamp(Number.isFinite(parsed) ? parsed : diagramConfig.minNodeDistance, 68, 5000);
+  diagramConfig.minNodeDistance = next;
+  ui.diagramMinDistance.value = String(next);
+  applyMinDistanceToAllDiagrams();
+  renderStateGraph();
+  renderSimpleGraph(ui.faGraph, faGraphEditor, ui.faSelectedState);
+  renderSimpleGraph(ui.pdaGraph, pdaGraphEditor, ui.pdaSelectedState);
+  closeDialog(ui.diagramConfigDialog);
+  message(`Distancia mínima de nodos: ${next}px.`, "ok");
+});
+ui.tabTM.addEventListener("click", () => switchView("tm"));
+ui.tabFA.addEventListener("click", () => switchView("fa"));
+ui.tabPDA.addEventListener("click", () => switchView("pda"));
+ui.faLoadExample.addEventListener("click", loadFaExample);
+ui.faEvaluate.addEventListener("click", handleFaEvaluate);
+ui.faMinimize.addEventListener("click", handleFaMinimize);
+ui.faAddState.addEventListener("click", () => editorAddState(faGraphEditor, "q", "fa"));
+ui.faSetStart.addEventListener("click", () => editorSetStart(faGraphEditor, "fa"));
+ui.faToggleAccept.addEventListener("click", () => editorToggleAccept(faGraphEditor, "fa"));
+ui.faDeleteState.addEventListener("click", () => editorDeleteState(faGraphEditor, "fa"));
+ui.faLoadGraphFromText.addEventListener("click", loadFaGraphFromForm);
+ui.pdaLoadExample.addEventListener("click", loadPdaExample);
+ui.pdaEvaluate.addEventListener("click", handlePdaEvaluate);
+ui.pdaAddState.addEventListener("click", () => editorAddState(pdaGraphEditor, "p", "pda"));
+ui.pdaSetStart.addEventListener("click", () => editorSetStart(pdaGraphEditor, "pda"));
+ui.pdaToggleAccept.addEventListener("click", () => editorToggleAccept(pdaGraphEditor, "pda"));
+ui.pdaDeleteState.addEventListener("click", () => editorDeleteState(pdaGraphEditor, "pda"));
+ui.pdaLoadGraphFromText.addEventListener("click", loadPdaGraphFromForm);
 
 setRunButtons(false);
 refreshSelectedState();
 refreshSelectedTransition();
+ui.diagramMinDistance.value = String(diagramConfig.minNodeDistance);
 loadExample();
+loadFaExample();
+loadPdaExample();
+bindSimpleGraphEditor(ui.faGraph, faGraphEditor, ui.faSelectedState, { prefix: "q", kind: "fa" });
+bindSimpleGraphEditor(ui.pdaGraph, pdaGraphEditor, ui.pdaSelectedState, { prefix: "p", kind: "pda" });
+loadFaGraphFromForm();
+loadPdaGraphFromForm();
+switchView("tm");
